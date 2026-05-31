@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-tensorflow
-pillow
 numpy
+pillow
 pymongo
+tensorflow-cpu
 python-multipart
