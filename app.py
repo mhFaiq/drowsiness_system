@@ -1,4 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
 import io
@@ -6,8 +8,10 @@ import base64
 from datetime import datetime
 from pymongo import MongoClient
 import os
-from fastapi.middleware.cors import CORSMiddleware
 
+app = FastAPI()
+
+# ---------------- CORS (MUST BE HERE) ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,23 +19,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app = FastAPI()
 
-# MongoDB
+# ---------------- MONGO ----------------
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client["drowsiness_detection_db"]
-collection = db["prediction_results"]
+collection = db["predictions"]
 
-MODEL = None  # lazy loading (IMPORTANT FIX)
-
-
-def load_model():
-    global MODEL
-    if MODEL is None:
-        from tensorflow.keras.models import load_model
-        MODEL = load_model("ultimate_drowsiness_system.h5")
-    return MODEL
+# ---------------- MODEL (LOAD ONCE) ----------------
+model = load_model("ultimate_drowsiness_system.h5")
 
 
 @app.get("/")
@@ -41,8 +37,6 @@ def home():
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-
-    model = load_model()
 
     image_bytes = await file.read()
 
@@ -61,12 +55,16 @@ async def predict(file: UploadFile = File(...)):
         prediction = "Non Drowsy"
         confidence = score * 100
 
-    collection.insert_one({
-        "timestamp": datetime.utcnow(),
-        "prediction": prediction,
-        "confidence": round(confidence, 2),
-        "image_base64": base64.b64encode(image_bytes).decode()
-    })
+    # SAVE TO MONGO (SAFE)
+    try:
+        collection.insert_one({
+            "timestamp": datetime.utcnow(),
+            "prediction": prediction,
+            "confidence": round(confidence, 2),
+            "image": base64.b64encode(image_bytes).decode()
+        })
+    except Exception as e:
+        print("Mongo error:", e)
 
     return {
         "prediction": prediction,
