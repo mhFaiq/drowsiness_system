@@ -1,34 +1,40 @@
 from fastapi import FastAPI, UploadFile, File
-from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
 import io
 import base64
-from pymongo import MongoClient
 from datetime import datetime
+from pymongo import MongoClient
+import os
 
 app = FastAPI()
 
-# Load model
-model = load_model("ultimate_drowsiness_system.h5")
-
-# MongoDB (replace with your Atlas URI later in Render)
-MONGO_URI = "YOUR_MONGO_URI"
+# MongoDB
+MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
-
 db = client["drowsiness_detection_db"]
 collection = db["prediction_results"]
 
-MODEL_ACCURACY = 94.0
+MODEL = None  # lazy loading (IMPORTANT FIX)
+
+
+def load_model():
+    global MODEL
+    if MODEL is None:
+        from tensorflow.keras.models import load_model
+        MODEL = load_model("ultimate_drowsiness_system.h5")
+    return MODEL
 
 
 @app.get("/")
 def home():
-    return {"message": "Drowsiness API Running"}
+    return {"message": "API Running"}
 
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+
+    model = load_model()
 
     image_bytes = await file.read()
 
@@ -47,18 +53,14 @@ async def predict(file: UploadFile = File(...)):
         prediction = "Non Drowsy"
         confidence = score * 100
 
-    document = {
+    collection.insert_one({
         "timestamp": datetime.utcnow(),
         "prediction": prediction,
         "confidence": round(confidence, 2),
-        "image_base64": base64.b64encode(image_bytes).decode(),
-        "model_accuracy": MODEL_ACCURACY
-    }
-
-    collection.insert_one(document)
+        "image_base64": base64.b64encode(image_bytes).decode()
+    })
 
     return {
         "prediction": prediction,
-        "confidence": round(confidence, 2),
-        "model_accuracy": MODEL_ACCURACY
+        "confidence": round(confidence, 2)
     }
